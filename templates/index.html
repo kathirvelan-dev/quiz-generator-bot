@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quiz & Lesson Generator | Hack to Hustle</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div id="hero3d"></div>
+    <header>
+      <h1>📚 AI Quiz & Lesson Generator</h1>
+      <p class="tagline">Upload a syllabus/notes PDF → get an instant quiz or lesson plan.</p>
+    </header>
+
+    <form id="genForm">
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="fileInput" name="file" accept=".pdf" required>
+        <span id="fileLabel">Click or drag a PDF here</span>
+      </label>
+
+      <div class="options">
+        <div class="field">
+          <label>Mode</label>
+          <select id="mode" name="mode">
+            <option value="quiz">Quiz</option>
+            <option value="lesson">Lesson Plan</option>
+          </select>
+        </div>
+
+        <div class="field" id="quizOptions">
+          <label>Questions</label>
+          <input type="number" id="num_questions" name="num_questions" value="10" min="3" max="25">
+        </div>
+
+        <div class="field" id="difficultyField">
+          <label>Difficulty</label>
+          <select id="difficulty" name="difficulty">
+            <option value="easy">Easy</option>
+            <option value="mixed" selected>Mixed</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
+      </div>
+
+      <button type="submit" id="submitBtn">Generate</button>
+    </form>
+
+    <div id="status"></div>
+    <div id="results"></div>
+  </div>
+
+<script>
+const form = document.getElementById('genForm');
+const fileInput = document.getElementById('fileInput');
+const fileLabel = document.getElementById('fileLabel');
+const modeSelect = document.getElementById('mode');
+const quizOptions = document.getElementById('quizOptions');
+const difficultyField = document.getElementById('difficultyField');
+const statusEl = document.getElementById('status');
+const resultsEl = document.getElementById('results');
+const submitBtn = document.getElementById('submitBtn');
+
+fileInput.addEventListener('change', () => {
+  fileLabel.textContent = fileInput.files.length ? fileInput.files[0].name : 'Click or drag a PDF here';
+});
+
+modeSelect.addEventListener('change', () => {
+  const isQuiz = modeSelect.value === 'quiz';
+  quizOptions.style.display = isQuiz ? 'flex' : 'none';
+  difficultyField.style.display = isQuiz ? 'flex' : 'none';
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  resultsEl.innerHTML = '';
+  statusEl.textContent = 'Reading PDF and generating with AI... this can take 15-30s.';
+  submitBtn.disabled = true;
+
+  const fd = new FormData(form);
+  try {
+    const res = await fetch('/generate', { method: 'POST', body: fd });
+    const json = await res.json();
+    if (!res.ok || json.error) {
+      statusEl.textContent = 'Error: ' + (json.error || 'Something went wrong.');
+      submitBtn.disabled = false;
+      return;
+    }
+    statusEl.textContent = '';
+    render(json.mode, json.data);
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+  submitBtn.disabled = false;
+});
+
+function render(mode, data) {
+  if (mode === 'quiz') {
+    let html = `<h2>${escapeHtml(data.title || 'Generated Quiz')}</h2>`;
+    (data.questions || []).forEach((q, i) => {
+      html += `<div class="card">
+        <div class="qnum">Q${i + 1} · ${q.type === 'mcq' ? 'Multiple Choice' : 'Short Answer'}</div>
+        <div class="qtext">${escapeHtml(q.question)}</div>`;
+      if (q.type === 'mcq' && q.options) {
+        html += '<ul class="options-list">';
+        q.options.forEach(opt => {
+          const isCorrect = opt === q.correct_answer;
+          html += `<li class="${isCorrect ? 'correct' : ''}">${escapeHtml(opt)}</li>`;
+        });
+        html += '</ul>';
+      } else {
+        html += `<div class="answer"><strong>Model answer:</strong> ${escapeHtml(q.correct_answer || '')}</div>`;
+      }
+      if (q.explanation) {
+        html += `<div class="explanation">${escapeHtml(q.explanation)}</div>`;
+      }
+      html += '</div>';
+    });
+    resultsEl.innerHTML = html;
+  } else {
+    let html = `<h2>${escapeHtml(data.title || 'Lesson Plan')}</h2>`;
+    if (data.objectives) {
+      html += '<div class="card"><strong>Objectives</strong><ul>';
+      data.objectives.forEach(o => html += `<li>${escapeHtml(o)}</li>`);
+      html += '</ul></div>';
+    }
+    (data.sections || []).forEach(s => {
+      html += `<div class="card">
+        <div class="qnum">${escapeHtml(s.heading)} · ${s.time_minutes} min</div>
+        <div class="qtext">${escapeHtml(s.content)}</div>
+      </div>`;
+    });
+    if (data.discussion_questions) {
+      html += '<div class="card"><strong>Discussion Questions</strong><ul>';
+      data.discussion_questions.forEach(q => html += `<li>${escapeHtml(q)}</li>`);
+      html += '</ul></div>';
+    }
+    resultsEl.innerHTML = html;
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
+}
+
+// ---- 3D floating book model (Three.js) ----
+(function init3D() {
+  const container = document.getElementById('hero3d');
+  const width = container.clientWidth;
+  const height = 220;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+  camera.position.set(0, 0.6, 4.2);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(width, height);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const light1 = new THREE.PointLight(0xff2fb0, 2.2, 20);
+  light1.position.set(2, 2, 3);
+  scene.add(light1);
+  const light2 = new THREE.PointLight(0x7b2fff, 2.2, 20);
+  light2.position.set(-2, -1, 2);
+  scene.add(light2);
+
+  // Group: a stylized "open book" made of two tilted planes + glowing pages
+  const bookGroup = new THREE.Group();
+
+  const coverMat = new THREE.MeshStandardMaterial({
+    color: 0x1a0c33, metalness: 0.4, roughness: 0.35,
+    emissive: 0x2a0f4d, emissiveIntensity: 0.4
+  });
+  const pageMat = new THREE.MeshStandardMaterial({
+    color: 0xf0e9ff, metalness: 0.1, roughness: 0.6,
+    emissive: 0x7b2fff, emissiveIntensity: 0.15
+  });
+
+  const leftCover = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.9, 0.05), coverMat);
+  leftCover.position.x = -0.72;
+  leftCover.rotation.y = 0.35;
+  bookGroup.add(leftCover);
+
+  const rightCover = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.9, 0.05), coverMat);
+  rightCover.position.x = 0.72;
+  rightCover.rotation.y = -0.35;
+  bookGroup.add(rightCover);
+
+  const leftPages = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.75, 0.14), pageMat);
+  leftPages.position.set(-0.68, 0, 0.02);
+  leftPages.rotation.y = 0.35;
+  bookGroup.add(leftPages);
+
+  const rightPages = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.75, 0.14), pageMat);
+  rightPages.position.set(0.68, 0, 0.02);
+  rightPages.rotation.y = -0.35;
+  bookGroup.add(rightPages);
+
+  // Orbiting glow particles (sparkle / AI feel)
+  const particleGeo = new THREE.BufferGeometry();
+  const count = 60;
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const r = 1.8 + Math.random() * 1.2;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI;
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = r * Math.cos(phi) * 0.5;
+    positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+  }
+  particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const particleMat = new THREE.PointsMaterial({ color: 0xff7fd0, size: 0.045, transparent: true, opacity: 0.85 });
+  const particles = new THREE.Points(particleGeo, particleMat);
+
+  scene.add(bookGroup);
+  scene.add(particles);
+
+  let frame = 0;
+  function animate() {
+    frame += 0.008;
+    bookGroup.rotation.y = Math.sin(frame) * 0.5;
+    bookGroup.position.y = Math.sin(frame * 1.4) * 0.08;
+    particles.rotation.y += 0.0015;
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  animate();
+
+  window.addEventListener('resize', () => {
+    const w = container.clientWidth;
+    camera.aspect = w / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, height);
+  });
+})();
+</script>
+</body>
+</html>
